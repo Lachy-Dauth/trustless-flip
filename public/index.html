@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trustless Flip - Provably Fair Winner Picker</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: { extend: { fontFamily: { mono: ['ui-monospace', 'SFMono-Regular', 'monospace'] } } }
+}
+</script>
+<style>
+@keyframes pulse-dot { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+.dot-pulse { animation: pulse-dot 1.4s ease-in-out infinite; }
+.dot-pulse:nth-child(2) { animation-delay: .2s; }
+.dot-pulse:nth-child(3) { animation-delay: .4s; }
+</style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-mono">
+
+<div class="max-w-xl mx-auto px-4 py-8">
+  <header class="text-center mb-8">
+    <h1 class="text-3xl font-bold text-emerald-400 tracking-tight">Trustless Flip</h1>
+    <p class="text-gray-500 text-xs mt-1">Provably Fair Winner Picker &middot; SHA-256 &middot; crypto.getRandomValues</p>
+  </header>
+
+  <!-- ==================== SCREEN: CREATOR FORM ==================== -->
+  <div id="screen-creator">
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+      <h2 class="text-lg font-semibold text-emerald-300 mb-4">Create a Game</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-gray-400 block mb-1">N — How many numbers Player 2 must pick</label>
+          <input id="input-n" type="number" min="1" value="3"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500">
+        </div>
+        <div>
+          <label class="text-xs text-gray-400 block mb-1">M — Total pool size (numbers 1 to M)</label>
+          <input id="input-m" type="number" min="1" value="20"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500">
+        </div>
+        <button id="btn-generate"
+                class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 rounded-lg transition">
+          Generate Game
+        </button>
+      </div>
+
+      <!-- Audit Trail -->
+      <div id="audit-trail" class="hidden mt-6 border-t border-gray-800 pt-4">
+        <h3 class="text-sm font-semibold text-emerald-400 mb-3">Audit Trail</h3>
+        <div class="space-y-1.5 text-xs bg-gray-950 rounded-lg p-3 border border-gray-800">
+          <div><span class="text-gray-500">Winning Number (R):</span> <span id="audit-r" class="text-white"></span></div>
+          <div><span class="text-gray-500">Salt (S):</span> <span id="audit-s" class="text-white"></span></div>
+          <div><span class="text-gray-500">Code (R_S):</span> <span id="audit-code" class="text-emerald-300 break-all"></span></div>
+          <div><span class="text-gray-500">SHA-256 Hash:</span> <span id="audit-hash" class="text-emerald-300 break-all"></span></div>
+        </div>
+        <button id="btn-create"
+                class="w-full mt-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2 rounded-lg transition">
+          Confirm &amp; Create Game
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== SCREEN: WAITING ==================== -->
+  <div id="screen-waiting" class="hidden">
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 text-center">
+      <h2 class="text-lg font-semibold text-emerald-300 mb-4">Game Created!</h2>
+      <p class="text-xs text-gray-400 mb-3">Share this link with Player 2:</p>
+      <div class="bg-gray-950 border border-gray-800 rounded-lg p-3 mb-3 break-all text-sm select-all" id="share-link-text">—</div>
+      <button id="btn-copy"
+              class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 font-semibold py-2 px-6 rounded-lg transition text-sm mb-6">
+        Copy Link
+      </button>
+      <div class="text-gray-400 text-sm">
+        Waiting for Player 2
+        <span class="dot-pulse">.</span><span class="dot-pulse">.</span><span class="dot-pulse">.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== SCREEN: JOINER ==================== -->
+  <div id="screen-joiner" class="hidden">
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+      <h2 class="text-lg font-semibold text-emerald-300 mb-4">Join Game</h2>
+      <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
+        <div class="bg-gray-950 rounded-lg p-3 border border-gray-800">
+          <span class="text-gray-500 text-xs">N (picks)</span>
+          <div class="text-xl font-bold text-white" id="joiner-n">—</div>
+        </div>
+        <div class="bg-gray-950 rounded-lg p-3 border border-gray-800">
+          <span class="text-gray-500 text-xs">M (pool)</span>
+          <div class="text-xl font-bold text-white" id="joiner-m">—</div>
+        </div>
+      </div>
+      <div class="bg-gray-950 rounded-lg p-3 border border-gray-800 mb-4 text-xs break-all">
+        <span class="text-gray-500">Commitment Hash:</span>
+        <div class="text-emerald-300 mt-1" id="joiner-hash">—</div>
+      </div>
+      <button id="btn-roll"
+              class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 rounded-lg transition">
+        Roll My Numbers
+      </button>
+      <div id="joiner-numbers-area" class="hidden mt-4">
+        <h3 class="text-xs text-gray-400 mb-2">Your Numbers</h3>
+        <div class="flex flex-wrap gap-1.5" id="joiner-numbers-list"></div>
+        <p class="text-emerald-400 text-xs mt-2 flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          Submitted. Waiting for result...
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== SCREEN: RESULTS ==================== -->
+  <div id="screen-results" class="hidden">
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+      <h2 class="text-lg font-semibold text-emerald-300 mb-4">Game Complete</h2>
+
+      <!-- Hash verification -->
+      <div id="hash-verification" class="flex items-center gap-2 bg-gray-950 rounded-lg p-3 border border-gray-800 mb-4">
+        <span id="hash-icon" class="text-lg"></span>
+        <div>
+          <div id="hash-status" class="text-sm font-semibold"></div>
+          <div id="hash-detail" class="text-xs text-gray-500 break-all mt-0.5"></div>
+        </div>
+      </div>
+
+      <!-- Winning info -->
+      <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
+        <div class="bg-gray-950 rounded-lg p-3 border border-gray-800">
+          <span class="text-gray-500 text-xs">Winning Number (R)</span>
+          <div class="text-xl font-bold text-white" id="result-r">—</div>
+        </div>
+        <div class="bg-gray-950 rounded-lg p-3 border border-gray-800">
+          <span class="text-gray-500 text-xs">Salt (S)</span>
+          <div class="text-xl font-bold text-white text-lg" id="result-s">—</div>
+        </div>
+      </div>
+
+      <div class="bg-gray-950 rounded-lg p-3 border border-gray-800 mb-4">
+        <span class="text-gray-500 text-xs">Player 2's Numbers</span>
+        <div class="flex flex-wrap gap-1.5 mt-1" id="result-p2-numbers"></div>
+      </div>
+
+      <!-- Winner verdict -->
+      <div class="bg-gray-950 rounded-lg p-3 border border-gray-800 mb-4 text-center">
+        <div class="text-xs text-gray-400 mb-1" id="result-formula"></div>
+        <div class="text-sm font-bold" id="result-answer"></div>
+      </div>
+
+      <div id="winner-callout"
+           class="text-center text-2xl font-bold py-4 rounded-lg border-2 transition-all">
+      </div>
+
+      <div class="mt-4 text-center">
+        <a href="/" class="text-emerald-400 hover:text-emerald-300 text-sm underline">Create New Game</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== ERROR ==================== -->
+  <div id="screen-error" class="hidden">
+    <div class="bg-gray-900 border border-red-900 rounded-xl p-6 text-center">
+      <h2 class="text-lg font-semibold text-red-400 mb-2">Error</h2>
+      <p class="text-sm text-gray-400" id="error-message">—</p>
+      <a href="/" class="inline-block mt-4 text-emerald-400 hover:text-emerald-300 text-sm underline">Back to Home</a>
+    </div>
+  </div>
+
+  <!-- ==================== FOOTER ==================== -->
+  <p class="text-center text-gray-600 text-xs mt-8">
+    All randomness uses <code class="text-gray-400">crypto.getRandomValues()</code>.
+    All hashing uses <code class="text-gray-400">SHA-256</code> via the Web Crypto API.
+    No external crypto libraries.
+  </p>
+</div>
+
+<script>
+// ========================== CRYPTO UTILITIES ==========================
+
+async function sha256(text) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(text);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function getRandomInt(max) {
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  return (arr[0] % max) + 1;
+}
+
+function getRandomNumbers(count, max) {
+  const pool = Array.from({ length: max }, (_, i) => i + 1);
+  for (let i = max - 1; i > 0; i--) {
+    const j = getRandomInt(i + 1) - 1;
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count).sort((a, b) => a - b);
+}
+
+function generateSalt() {
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map(b => (b % 10).toString()).join('');
+}
+
+// ========================== STATE ==========================
+
+let gameCode = null;
+let gameHash = null;
+let eventSource = null;
+let isCreator = false;
+
+// ========================== DOM REFS ==========================
+
+const $ = id => document.getElementById(id);
+
+// ========================== SCREEN MANAGEMENT ==========================
+
+function showScreen(name) {
+  ['creator', 'waiting', 'joiner', 'results', 'error'].forEach(s => {
+    $(`screen-${s}`).classList.toggle('hidden', s !== name);
+  });
+}
+
+function showError(msg) {
+  $('error-message').textContent = msg;
+  showScreen('error');
+}
+
+// ========================== CREATOR FLOW ==========================
+
+$('btn-generate').addEventListener('click', async () => {
+  const n = parseInt($('input-n').value);
+  const m = parseInt($('input-m').value);
+  if (!n || !m || n < 1 || m < 1 || n > m) {
+    alert('N and M must satisfy 1 ≤ N ≤ M');
+    return;
+  }
+
+  const R = getRandomInt(m);
+  const S = generateSalt();
+  const code = `${R}_${S}`;
+  const hash = await sha256(code);
+
+  gameCode = code;
+  gameHash = hash;
+
+  $('audit-r').textContent = R;
+  $('audit-s').textContent = S;
+  $('audit-code').textContent = code;
+  $('audit-hash').textContent = hash;
+  $('audit-trail').classList.remove('hidden');
+});
+
+$('btn-create').addEventListener('click', async () => {
+  if (!gameCode) return;
+  const n = parseInt($('input-n').value);
+  const m = parseInt($('input-m').value);
+
+  try {
+    const res = await fetch('/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ n, m, hash: gameHash, code: gameCode }),
+    });
+    const data = await res.json();
+    if (!res.ok) { showError(data.error); return; }
+
+    sessionStorage.setItem(`game-${data.id}`, JSON.stringify({ code: gameCode, hash: gameHash }));
+    history.replaceState(null, '', `/?id=${data.id}`);
+    isCreator = true;
+    showWaiting(data.id);
+    connectSSE(data.id, true);
+  } catch (e) {
+    showError(e.message);
+  }
+});
+
+// ========================== WAITING SCREEN ==========================
+
+function showWaiting(id) {
+  const link = `${window.location.origin}/?id=${id}`;
+  $('share-link-text').textContent = link;
+  showScreen('waiting');
+}
+
+$('btn-copy').addEventListener('click', () => {
+  const text = $('share-link-text').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    $('btn-copy').textContent = 'Copied!';
+    setTimeout(() => { $('btn-copy').textContent = 'Copy Link'; }, 2000);
+  }).catch(() => {
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents($('share-link-text'));
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+});
+
+// ========================== JOINER FLOW ==========================
+
+async function showJoiner(id) {
+  try {
+    const res = await fetch(`/game/${id}`);
+    if (!res.ok) { showError('Game not found'); return; }
+    const data = await res.json();
+    if (data.status === 'completed') {
+      gameCode = data.code;
+      gameHash = data.hash;
+      showResults(data);
+      return;
+    }
+
+    $('joiner-n').textContent = data.n;
+    $('joiner-m').textContent = data.m;
+    $('joiner-hash').textContent = data.hash;
+    showScreen('joiner');
+
+    window.__joinerGameId = id;
+    window.__joinerN = data.n;
+    window.__joinerM = data.m;
+    connectSSE(id, false);
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+$('btn-roll').addEventListener('click', async () => {
+  const n = window.__joinerN;
+  const m = window.__joinerM;
+  const id = window.__joinerGameId;
+
+  const numbers = getRandomNumbers(n, m);
+  $('joiner-numbers-list').innerHTML = numbers.map(v =>
+    `<span class="bg-emerald-900 text-emerald-200 px-2.5 py-1 rounded text-sm font-bold">${v}</span>`
+  ).join('');
+  $('joiner-numbers-area').classList.remove('hidden');
+  $('btn-roll').disabled = true;
+  $('btn-roll').classList.add('opacity-50', 'cursor-not-allowed');
+  $('btn-roll').textContent = 'Rolled!';
+
+  try {
+    const res = await fetch(`/submit/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ numbers }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      showError(err.error);
+    }
+  } catch (e) {
+    showError(e.message);
+  }
+});
+
+// ========================== SSE ==========================
+
+function connectSSE(id, creator) {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`/events/${id}`);
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'completed' || data.status === 'completed') {
+        gameCode = data.code;
+        gameHash = data.hash;
+        showResults(data);
+      }
+    } catch (e) {
+      console.error('SSE error:', e);
+    }
+  };
+  eventSource.onerror = () => {
+    // EventSource auto-reconnects
+  };
+}
+
+// ========================== RESULTS ==========================
+
+function showResults(data) {
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  showScreen('results');
+
+  const code = data.code || gameCode;
+  const hash = data.hash || gameHash;
+  const p2 = data.player2Numbers || data.p2;
+
+  // Verify hash
+  sha256(code).then(computedHash => {
+    const match = computedHash === hash;
+    $('hash-icon').textContent = match ? '✅' : '❌';
+    $('hash-status').textContent = match ? 'SHA-256 Hash Verified' : 'Hash Mismatch!';
+    $('hash-status').className = match ? 'text-sm font-semibold text-emerald-400' : 'text-sm font-semibold text-red-400';
+    $('hash-detail').textContent = `Computed: ${computedHash}`;
+  });
+
+  const [rStr, salt] = code.split('_');
+  const R = parseInt(rStr);
+  const sortedP2 = [...p2].sort((a, b) => a - b);
+  const user2Wins = sortedP2.includes(R);
+
+  $('result-r').textContent = R;
+  $('result-s').textContent = salt;
+  $('result-p2-numbers').innerHTML = sortedP2.map(v => {
+    const highlight = v === R;
+    return `<span class="${highlight ? 'bg-emerald-700 ring-2 ring-emerald-400' : 'bg-gray-800'} text-white px-2.5 py-1 rounded text-sm font-bold">${v}</span>`;
+  }).join('');
+  $('result-formula').textContent = `${R} ∈ [${sortedP2.join(', ')}] ?`;
+
+  const callout = $('winner-callout');
+  if (user2Wins) {
+    $('result-answer').textContent = '→ YES — Player 2 wins!';
+    $('result-answer').className = 'text-sm font-bold text-emerald-400';
+    callout.textContent = '🏆 Player 2 Wins!';
+    callout.className = 'text-center text-2xl font-bold py-4 rounded-lg border-2 border-emerald-500 bg-emerald-900/30 text-emerald-300';
+  } else {
+    $('result-answer').textContent = '→ NO — Player 1 wins!';
+    $('result-answer').className = 'text-sm font-bold text-amber-400';
+    callout.textContent = '🏆 Player 1 Wins!';
+    callout.className = 'text-center text-2xl font-bold py-4 rounded-lg border-2 border-amber-500 bg-amber-900/30 text-amber-300';
+  }
+
+  // Clear stored game data
+  const params = new URLSearchParams(window.location.search);
+  const gid = params.get('id');
+  if (gid) sessionStorage.removeItem(`game-${gid}`);
+}
+
+// ========================== INIT ==========================
+
+async function init() {
+  const params = new URLSearchParams(window.location.search);
+  const gid = params.get('id');
+
+  if (!gid) {
+    showScreen('creator');
+    return;
+  }
+
+  // Check if we're the creator
+  const stored = sessionStorage.getItem(`game-${gid}`);
+  if (stored) {
+    const { code, hash } = JSON.parse(stored);
+    gameCode = code;
+    gameHash = hash;
+    isCreator = true;
+    showWaiting(gid);
+    connectSSE(gid, true);
+  } else {
+    await showJoiner(gid);
+  }
+}
+
+init();
+</script>
+</body>
+</html>
