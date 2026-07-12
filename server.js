@@ -79,7 +79,7 @@ app.post('/submit/:id', (req, res) => {
 
   g.player2Numbers = numbers;
   g.status = 'completed';
-  broadcast(req.params.id, { type: 'completed', game: { ...g } });
+  broadcast(req.params.id, { type: 'completed', ...g });
   res.json({ status: 'completed' });
 });
 

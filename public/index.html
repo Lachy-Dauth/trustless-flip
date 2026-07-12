@@ -370,9 +370,10 @@ function connectSSE(id, creator) {
     try {
       const data = JSON.parse(event.data);
       if (data.type === 'completed' || data.status === 'completed') {
-        gameCode = data.code;
-        gameHash = data.hash;
-        showResults(data);
+        const g = data.game || data;
+        gameCode = g.code;
+        gameHash = g.hash;
+        showResults(g);
       }
     } catch (e) {
       console.error('SSE error:', e);
